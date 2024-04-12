@@ -1,0 +1,189 @@
+
+00 03 * * * /home/hybrid-iam/unix_iam/Quarantined_Script/qscript1.sh
+00 04 * * * /home/hybrid-iam/unix_iam/Quarantined_Script/lock_qusers.sh
+00 05 * * * /home/hybrid-iam/unix_iam/Quarantined_Script/recheck_qurantine.sh
+00 08 * * * /home/hybrid-iam/unix_iam/Archive_Scripts/validate_arch_users.sh
+00 09 * * * /home/hybrid-iam/unix_iam/Archive_Scripts/del_arch_users.sh
+00 10 * * * /home/hybrid-iam/unix_iam/Archive_Scripts/recheck_arch.sh
+
+
+
+
+
+
+[root@seskalsshcpc02 Quarantined_Script]# cat /home/hybrid-iam/unix_iam/Quarantined_Script/qscript1.sh
+#!/bin/bash
+#####################################################################################
+#
+# Master script to run unix daily quarantined  script
+# Owner : Parthasarathy Vijayan (IAM Unix Permissions Team)
+# Date  : 08 Aug 2023
+#####################################################################################
+WORKDIR=/home/hybrid-iam/unix_iam/Quarantined_Script
+cd $WORKDIR
+rm -rf today_users.csv
+DATE=`date +%Y-%m-%d`
+cp /Quarantined/Quarantined_$DATE.csv today_qusers.csv
+grep ^k today_qusers.csv | awk -F, {'print $1'}  > quaran_users
+for i in `cat servers`
+do
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -q $i " grep ^k /etc/passwd  " > users
+for j in `cat users | awk -F: '{print $1}'`
+do
+if grep -i $j quaran_users > /dev/null
+then
+echo $i : $j  >> unix_quarantined_$DATE.txt
+fi
+done
+done
+if [ -s unix_quarantined_$DATE.txt ]
+then
+cat msg| mailx -s "  Daily Unix Quarantined report" -a /home/hybrid-iam/unix_iam/Quarantined_Script/unix_quarantined_$DATE.txt inchiamiaccessteam@astrazeneca.com
+else
+cat msg1| mailx -s "  Daily Unix Quarantined report " inchiamiaccessteam@astrazeneca.com
+fi
+
+[root@seskalsshcpc02 Quarantined_Script]# cat /home/hybrid-iam/unix_iam/Quarantined_Script/lock_qusers.sh
+#!/bin/bash
+#####################################################################################
+#
+# script to remove  unix daily archival users
+# Owner : Parthasarathy Vijayan (IAM Unix Permissions Team)
+# Date  : 08 Aug 2023
+#####################################################################################
+WORKDIR=/home/hybrid-iam/unix_iam/Quarantined_Script
+cd $WORKDIR
+DATE=`date +%Y-%m-%d`
+cp unix_quarantined_$DATE.txt qvalid.out
+for i in `cat unix_quarantined_$DATE.txt`
+do
+if [ -s qvalid.out ]; then
+server=`awk 'NR==1{print $1}' qvalid.out`
+grep -i $server unix_quarantined_$DATE.txt | awk -F':' '{print $2}' > inputuser
+sed -i -e 's/^/passwd -l /' inputuser
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -q $server 'bash -s' < inputuser
+sed -i "/$server/d" qvalid.out
+else
+exit 1
+fi
+done
+[root@seskalsshcpc02 Quarantined_Script]# cat /home/hybrid-iam/unix_iam/Quarantined_Script/recheck_qurantine.sh
+#!/bin/bash
+#####################################################################################
+#
+# script to recheck  unix daily Qurantine users
+# Owner : Parthasarathy Vijayan (IAM Unix Permissions Team)
+# Date  : 08 Aug 2023
+#####################################################################################
+WORKDIR=/home/hybrid-iam/unix_iam/Quarantined_Script
+cd $WORKDIR
+DATE=`date +%Y-%m-%d`
+cp unix_quarantined_$DATE.txt valid.out
+for i in `cat unix_quarantined_$DATE.txt`
+do
+if [ -s valid.out ]; then
+server=`awk 'NR==1{print $1}' valid.out`
+grep -i $server unix_quarantined_$DATE.txt | awk -F':' '{print $2}' > inputuserq
+sed -i -e 's/^/uname -n;passwd -S/' inputuserq
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -q $server 'bash -s' < inputuserq >> recheck_qurantine_$DATE.txt 2>&1
+sed -i "/$server/d" valid.out
+fi
+done
+if [ -s recheck_qurantine_$DATE.txt ]
+then
+cat msg4 | mailx -s " test | ReCheck Daily Unix Archival Report" -a /home/hybrid-iam/unix_iam/Quarantined_Script/recheck_qurantine_$DATE.txt inchiamiaccessteam@astrazeneca.com
+else
+cat msg3 | mailx -s " test | ReCheck Daily Unix Archival Report" inchiamiaccessteam@astrazeneca.com
+fi
+[root@seskalsshcpc02 Quarantined_Script]# cat /home/hybrid-iam/unix_iam/Archive_Scripts/validate_arch_users.sh
+#!/bin/bash
+#####################################################################################
+#
+# Master script to run unix daily archival script
+# Owner : Parthasarathy Vijayan (IAM Unix Permissions Team)
+# Date  : 08 Aug 2023
+#####################################################################################
+WORKDIR=/home/hybrid-iam/unix_iam/Archive_Scripts
+cd $WORKDIR
+rm -rf today_users.csv
+DATE=`date +%Y-%m-%d`
+cp /Archive/ArchivalCheck_$DATE.csv today_users.csv
+grep ^k today_users.csv | awk -F, {'print $1'}  > arch_users
+for i in `cat servers`
+do
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -q $i " grep ^k /etc/passwd  " > users
+for j in `cat users | awk -F: '{print $1}'`
+do
+if grep -i $j arch_users > /dev/null
+then
+echo $i : $j  >> leavers_$DATE.txt
+fi
+done
+done
+if [ -s leavers_$DATE.txt ]
+then
+cat msg| mailx -s " Daily Unix Archival report" -a /home/hybrid-iam/unix_iam/Archive_Scripts/leavers_$DATE.txt inchiamiaccessteam@astrazeneca.com
+else
+cat msg1| mailx -s "Daily Unix Archival report " inchiamiaccessteam@astrazeneca.com
+fi
+[root@seskalsshcpc02 Quarantined_Script]# cat /home/hybrid-iam/unix_iam/Archive_Scripts/del_arch_users.sh
+#!/bin/bash
+#####################################################################################
+#
+# script to remove  unix daily archival users
+# Owner : Parthasarathy Vijayan (IAM Unix Permissions Team)
+# Date  : 08 Aug 2023
+#####################################################################################
+WORKDIR=/home/hybrid-iam/unix_iam/Archive_Scripts
+cd $WORKDIR
+DATE=`date +%Y-%m-%d`
+cp leavers_$DATE.txt  input.out
+for i in `cat leavers_$DATE.txt`
+do
+if [ -s input.out ]; then
+server=`awk 'NR==1{print $1}' input.out`
+grep -i $server leavers_$DATE.txt | awk -F':' '{print $2}' > inputuser
+sed -i -e 's/^/userdel -r/' inputuser
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -q $server 'bash -s' < inputuser
+sed -i "/$server/d" input.out
+else
+exit 1
+fi
+done
+
+[root@seskalsshcpc02 Quarantined_Script]# cat /home/hybrid-iam/unix_iam/Archive_Scripts/recheck_arch.sh
+#!/bin/bash
+#####################################################################################
+#
+# script to remove  unix daily archival users
+# Owner : Parthasarathy Vijayan (IAM Unix Permissions Team)
+# Date  : 08 Aug 2023
+#####################################################################################
+WORKDIR=/home/hybrid-iam/unix_iam/Archive_Scripts
+cd $WORKDIR
+DATE=`date +%Y-%m-%d`
+cp leavers_$DATE.txt valid.out
+for i in `cat leavers_$DATE.txt`
+do
+if [ -s valid.out ]; then
+server=`awk 'NR==1{print $1}' valid.out`
+grep -i $server leavers_$DATE.txt | awk -F':' '{print $2}' > inputuserv
+sed -i -e 's/^/uname -n;id/' inputuserv
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -q $server 'bash -s' < inputuserv >> recheck_output_$DATE.txt 2>&1
+sed -i "/$server/d" valid.out
+fi
+done
+if [ -s recheck_output_$DATE.txt ]
+then
+cat msg4 | mailx -s "  ReCheck Daily Unix Archival Report" -a /home/hybrid-iam/unix_iam/Archive_Scripts/recheck_output_$DATE.txt inchiamiaccessteam@astrazeneca.com
+else
+cat msg3 | mailx -s "  ReCheck Daily Unix Archival Report" inchiamiaccessteam@astrazeneca.com
+fi
+
+
+[root@seskalsshcpc02 Quarantined_Script]#
+
+
+
+
+

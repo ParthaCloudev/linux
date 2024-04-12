@@ -1,0 +1,113 @@
+$ cat sox_userreport.sh
+#!/bin/bash
+#####################################################################################
+#
+# Master script to run /home/soxaudit/userreport/user_report.sh on all SOX servers
+# Owner : IAM Unix Permissions Team
+# Date  : 07 Aug 2017
+#####################################################################################
+
+# Variable Declaration
+SUBJECT="SOX Audit Report - `uname -n` - `uname` - `date +%D`"
+TO="Vinodhkumar.Balakrishnan@astrazeneca.com"
+CC="INCHIAMUnixTeam@astrazeneca.com,INCHIAMAssuranceEngineers@astrazeneca.com,CSIS-IAM-HybridOperationsTeam@astrazeneca.com"
+To="INCHIAMUnixTeam@astrazeneca.com,CSIS-IAM-HybridOperationsTeam@astrazeneca.com"
+R_HOST=`uname -n`
+R_FLAVOR=`uname`
+DATE=`date +%Y-%m`
+WORKDIR=/home/soxaudit/userreport
+R_PATH=/home/soxaudit/userreport/reports
+ATTACH=/home/soxaudit/userreport/reports/$DATE/SOX_Report-$DATE.txt
+USRCNT=/home/soxaudit/userreport/reports/UserCount.txt
+
+rm -rf /home/soxaudit/userreport/reports/$DATE/SOX_Report-$DATE.txt
+rm -rf /home/soxaudit/userreport/reports/UserCount.txt
+mkdir $R_PATH/$DATE
+
+for i in `cat /home/soxaudit/userreport/servers`
+do
+ssh -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes -l soxaudit -t  $i "rm -rf /home/soxaudit/userreport/*.txt ;
+/home/soxaudit/userreport/new_user_report.sh ; "
+done
+
+sum=0
+for j in `cat $USRCNT| awk -F: '{print $2}'`
+do
+sum=`expr $sum + $j`
+done
+
+sed h /home/soxaudit/userreport/reports/$DATE/*.txt > /home/soxaudit/userreport/reports/$DATE/SOX_Report-$DATE.txt
+count=`wc -l /home/soxaudit/userreport/reports/$DATE/SOX_Report-$DATE.txt |awk -F" " '{print $1}'`
+
+if [ "$sum" = "$count" ]
+then
+(cat /home/soxaudit/userreport/msg ; uuencode $ATTACH SOX-Report-$DATE.xls ; uuencode $USRCNT UserCount.xls ) |  mailx -s "$SUBJECT" -r "Kannan Narmadha <soxaudit@sesksapa568.sap.astrazeneca.net>" -c "$CC" "$TO"
+else
+(cat /home/soxaudit/userreport/msg.err ; uuencode $ATTACH SOX-Report-$DATE.xls ; uuencode $USRCNT UserCount.xls ) |  mailx -s "Urgent - $SUBJECT" -r "Kannan Narmadha <soxaudit@sesksapa568.sap.astrazeneca.net>" "$To"
+Fi
+
+
+
+
+$ cat /home/soxaudit/userreport/new_user_report.sh
+#!/bin/ksh
+########################################################
+## Script Owner: AZ IAM Unix Permissions
+## SOX User report extraction
+########################################################
+
+# Variable Declaration
+R_HOST=`uname -n`
+R_FLAVOR=`uname`
+DATE=`date +%Y-%m`
+WORKDIR=/home/soxaudit/userreport
+R_PATH=/home/soxaudit/userreport/reports
+O_FILE=$WORKDIR/$R_HOST-$DATE.txt
+
+# Valdate and Remove if the file exist
+if [ -f `uname -n`* ]
+then
+        rm -f `uname -n`*
+fi
+
+# Main Script
+USR_COUNT=`cat /etc/passwd | wc -l`
+cat /etc/passwd | awk -F: '{print $1}' > userlist
+for i in `cat userlist`
+do
+USRATTR=`grep -w ^$i: /etc/passwd | awk -F: '{print $1"#"$3"#"$5"#"$7}'`
+WTMP=`last -1 $i | awk -F" " '{print $1}'`
+
+# Last login status
+case "$WTMP" in
+        *wtmp*)
+                LASTLOG="Never logged in" ;;
+        *)
+                LASTLOG=`last -1 $i | awk -F" " '{print $4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14}'` ;;
+esac
+
+# Gathering Password status
+case "$R_FLAVOR" in
+        AIX) /usr/bin/sudo lsuser -a account_locked $i | awk -F"=" '{print $2}' > pwdstat;;
+        Linux) /usr/bin/sudo passwd -S $i | awk -F" " '{print $2}' > pwdstat;;
+        *) /usr/bin/sudo passwd -s $i | awk -F" " '{print $2}' > pwdstat;;
+esac
+case "`cat pwdstat`" in
+        PS) echo "Enabled" > pwdflag;;
+        NL) echo "Enabled" > pwdflag;;
+        NP) echo "Enabled" > pwdflag;;
+        LK) echo "Diabled" > pwdflag;;
+        false) echo "Enabled" > pwdflag;;
+        true) echo "Disbled" > pwdflag;;
+        *) echo "Unknown" > pwdflag;;
+esac
+PWDSTAT=`cat pwdflag`
+GRP=`groups $i`
+echo "$R_HOST"#"$R_FLAVOR"#"$USRATTR"#"$LASTLOG"#"$PWDSTAT"#"$GRP" >> $WORKDIR/$R_HOST-$DATE.txt
+done
+echo "$R_HOST:$USR_COUNT" | ssh -q soxaudit@10.60.99.78 'cat >> /home/soxaudit/userreport/reports/UserCount.txt'
+scp -q $O_FILE soxaudit@10.60.99.78:$R_PATH/$DATE
+# Cleaning up temp files and copying output to master server
+rm userlist pwdstat pwdflag
+#sleep 5
+rm $O_FILE
